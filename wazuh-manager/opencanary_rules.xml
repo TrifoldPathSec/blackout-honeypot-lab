@@ -1,0 +1,154 @@
+<!--
+  OpenCanary honeypot rules for Wazuh 4.x
+  Install on the manager: /var/ossec/etc/rules/opencanary_rules.xml
+  Author: @alex_mh
+
+  OpenCanary writes one JSON object per line. Wazuh's built-in JSON decoder
+  parses it, so fields are available as: logtype, node_id, src_host, src_port,
+  dst_host, dst_port, logdata.USERNAME, logdata.PASSWORD, logdata.PATH, ...
+  (log type codes: opencanary/logger.py)
+
+  Nothing legitimate talks to a canary, so every touch is worth an alert.
+  Rule IDs 100500-100549 are reserved for this file.
+-->
+<group name="opencanary,honeypot,">
+
+  <!-- Parent: any event from a canary node. Level 0 so it only feeds children. -->
+  <rule id="100500" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="node_id" type="pcre2">^canary-</field>
+    <field name="logtype" type="pcre2">^\d+$</field>
+    <description>OpenCanary: event</description>
+  </rule>
+
+  <!-- Health -->
+  <rule id="100501" level="3">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^1000$</field>
+    <description>OpenCanary: honeypot started on $(node_id)</description>
+    <group>opencanary_health,</group>
+  </rule>
+
+  <rule id="100502" level="0">
+    <if_sid>100500</if_sid>
+    <field name="logtype" type="pcre2">^100[1-6]$</field>
+    <description>OpenCanary: internal message</description>
+  </rule>
+
+  <!-- Credential attempts -->
+  <rule id="100510" level="10">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^2000$</field>
+    <description>OpenCanary: FTP login attempt from $(src_host) as '$(logdata.USERNAME)'</description>
+    <mitre><id>T1110</id></mitre>
+    <group>opencanary_hit,opencanary_auth,authentication_failed,</group>
+  </rule>
+
+  <rule id="100511" level="10">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^3001$</field>
+    <description>OpenCanary: HTTP login attempt from $(src_host) as '$(logdata.USERNAME)'</description>
+    <mitre><id>T1110</id></mitre>
+    <group>opencanary_hit,opencanary_auth,authentication_failed,</group>
+  </rule>
+
+  <rule id="100512" level="10">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^4002$</field>
+    <description>OpenCanary: SSH login attempt from $(src_host) as '$(logdata.USERNAME)'</description>
+    <mitre><id>T1110</id><id>T1021.004</id></mitre>
+    <group>opencanary_hit,opencanary_auth,authentication_failed,</group>
+  </rule>
+
+  <rule id="100513" level="10">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^6001$</field>
+    <description>OpenCanary: Telnet login attempt from $(src_host) as '$(logdata.USERNAME)'</description>
+    <mitre><id>T1110</id></mitre>
+    <group>opencanary_hit,opencanary_auth,authentication_failed,</group>
+  </rule>
+
+  <rule id="100514" level="10">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^8001$</field>
+    <description>OpenCanary: MySQL login attempt from $(src_host) as '$(logdata.USERNAME)'</description>
+    <mitre><id>T1110</id></mitre>
+    <group>opencanary_hit,opencanary_auth,authentication_failed,</group>
+  </rule>
+
+  <rule id="100515" level="10">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^12001$</field>
+    <description>OpenCanary: VNC authentication attempt from $(src_host)</description>
+    <mitre><id>T1110</id><id>T1021.005</id></mitre>
+    <group>opencanary_hit,opencanary_auth,authentication_failed,</group>
+  </rule>
+
+  <!-- Connections and probes -->
+  <rule id="100520" level="6">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^3000$</field>
+    <description>OpenCanary: HTTP request from $(src_host) for $(logdata.PATH)</description>
+    <mitre><id>T1595</id></mitre>
+    <group>opencanary_hit,opencanary_probe,</group>
+  </rule>
+
+  <rule id="100521" level="6">
+    <if_sid>100500</if_sid>
+    <field name="logtype" type="pcre2">^400[01]$</field>
+    <description>OpenCanary: SSH connection from $(src_host)</description>
+    <mitre><id>T1021.004</id></mitre>
+    <group>opencanary_hit,opencanary_probe,</group>
+  </rule>
+
+  <rule id="100522" level="8">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^14001$</field>
+    <description>OpenCanary: RDP connection from $(src_host) as '$(logdata.USERNAME)'</description>
+    <mitre><id>T1021.001</id></mitre>
+    <group>opencanary_hit,opencanary_probe,</group>
+  </rule>
+
+  <rule id="100523" level="8">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^17001$</field>
+    <description>OpenCanary: Redis command '$(logdata.CMD)' from $(src_host)</description>
+    <mitre><id>T1190</id></mitre>
+    <group>opencanary_hit,opencanary_probe,</group>
+  </rule>
+
+  <rule id="100524" level="8">
+    <if_sid>100500</if_sid>
+    <field name="logtype">^16001$</field>
+    <description>OpenCanary: Git clone request from $(src_host) for $(logdata.REPO)</description>
+    <mitre><id>T1213</id></mitre>
+    <group>opencanary_hit,opencanary_probe,</group>
+  </rule>
+
+  <!-- Anything else a canary reports (other modules, future log types) -->
+  <rule id="100529" level="6">
+    <if_sid>100500</if_sid>
+    <field name="logtype" type="pcre2">^([2-9]\d{3}|\d{5})$</field>
+    <description>OpenCanary: activity (logtype $(logtype)) from $(src_host)</description>
+    <group>opencanary_hit,opencanary_probe,</group>
+  </rule>
+
+  <!-- Correlation -->
+  <rule id="100540" level="12" frequency="5" timeframe="120">
+    <if_matched_group>opencanary_auth</if_matched_group>
+    <same_field>src_host</same_field>
+    <description>OpenCanary: brute force - 5+ login attempts from $(src_host) in 2 minutes</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>opencanary_correlation,</group>
+  </rule>
+
+  <rule id="100541" level="12" frequency="3" timeframe="120">
+    <if_matched_group>opencanary_hit</if_matched_group>
+    <same_field>src_host</same_field>
+    <different_field>dst_port</different_field>
+    <description>OpenCanary: service sweep - $(src_host) touched 3+ decoy services in 2 minutes</description>
+    <mitre><id>T1046</id></mitre>
+    <group>opencanary_correlation,</group>
+  </rule>
+
+</group>

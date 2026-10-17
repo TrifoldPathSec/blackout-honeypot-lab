@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canary Attack Dashboard</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f3f0;
+  --surface: #fcfcfb;
+  --border: #e3e2dd;
+  --grid: #ecebe7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #7a7974;
+  --series-1: #2a78d6;
+  --series-1-hover: #1c5cab;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --chip-ink: #0b0b0b;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #121211; --surface: #1a1a19; --border: #2c2c2a; --grid: #262624;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --series-1: #3987e5; --series-1-hover: #6da7ec;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121211; --surface: #1a1a19; --border: #2c2c2a; --grid: #262624;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+  --series-1: #3987e5; --series-1-hover: #6da7ec;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 20px 16px 40px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 18px; }
+h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+.sub { color: var(--text-secondary); font-size: 13px; }
+.spacer { flex: 1; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); }
+.badge.demo { border-color: var(--warning); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; color: var(--text-secondary); padding: 6px 12px; font: inherit; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--series-1); color: #fff; }
+.grid { display: grid; gap: 14px; }
+.kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 860px) { .kpis { grid-template-columns: repeat(2, 1fr); } .two { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.card h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--text-secondary); }
+.kpi .v { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.kpi .l { color: var(--text-secondary); font-size: 13px; }
+section { margin-top: 14px; }
+svg { display: block; width: 100%; overflow: visible; }
+svg text { fill: var(--text-muted); font-size: 11px; }
+.bar { fill: var(--series-1); }
+.bar:hover, .hbar:hover .bar { fill: var(--series-1-hover); }
+.hrow { display: grid; grid-template-columns: 9.5em 1fr 3.5em; align-items: center; gap: 8px; padding: 3px 0; }
+.hrow .k { font-family: var(--mono); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hrow .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.track { height: 14px; }
+.track > div { height: 100%; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px; }
+.hrow:hover .track > div { background: var(--series-1-hover); }
+.empty { color: var(--text-muted); padding: 18px 0; text-align: center; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border); padding: 6px 8px; white-space: nowrap; }
+td { border-bottom: 1px solid var(--grid); padding: 6px 8px; vertical-align: top; }
+td.mono { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+.scroll { overflow-x: auto; max-height: 460px; overflow-y: auto; }
+.sev { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.sev i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.sev.critical i { background: var(--critical); } .sev.serious i { background: var(--serious); }
+.sev.warning i { background: var(--warning); } .sev.low i { background: var(--good); }
+.mitre { font-family: var(--mono); font-size: 11.5px; color: var(--text-secondary); }
+.err { margin-top: 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--critical); display: none; }
+#tip { position: fixed; pointer-events: none; background: var(--text-primary); color: var(--surface); font-size: 12px;
+  padding: 6px 9px; border-radius: 6px; opacity: 0; transition: opacity .08s; z-index: 10; white-space: nowrap; }
+footer { margin-top: 18px; color: var(--text-muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Canary Attack Dashboard</h1>
+      <div class="sub">OpenCanary decoys → Wazuh · <span id="updated">loading…</span></div>
+    </div>
+    <span class="badge demo" id="demo" hidden>⚠ Demo data</span>
+    <div class="spacer"></div>
+    <div class="seg" role="group" aria-label="Time range">
+      <button data-r="1h">1 h</button><button data-r="24h">24 h</button><button data-r="7d">7 d</button>
+    </div>
+  </header>
+
+  <div class="err" id="err"></div>
+
+  <div class="grid kpis">
+    <div class="card kpi"><div class="v" id="k-events">–</div><div class="l">Decoy hits</div></div>
+    <div class="card kpi"><div class="v" id="k-sources">–</div><div class="l">Unique source hosts</div></div>
+    <div class="card kpi"><div class="v" id="k-auth">–</div><div class="l">Credential attempts</div></div>
+    <div class="card kpi"><div class="v" id="k-corr">–</div><div class="l">Correlated attacks (brute force, sweeps)</div></div>
+  </div>
+
+  <section class="card">
+    <h2 id="tl-title">Decoy hits over time</h2>
+    <div id="timeline"></div>
+  </section>
+
+  <section class="grid two">
+    <div class="card"><h2>Decoy services targeted</h2><div id="ports"></div></div>
+    <div class="card"><h2>Top source hosts</h2><div id="sources"></div></div>
+  </section>
+
+  <section class="grid two">
+    <div class="card"><h2>Usernames tried</h2><div id="users"></div></div>
+    <div class="card"><h2>Passwords tried</h2><div id="passwords"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Latest alerts</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Time</th><th>Severity</th><th>Source</th><th>Service</th><th>Alert</th><th>Credentials</th><th>MITRE</th></tr></thead>
+        <tbody id="feed"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>Rules 100500–100549 · refreshes every 15 s · @alex_mh</footer>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+const SERVICES = {"21":"FTP","22":"SSH","23":"Telnet","80":"HTTP","3306":"MySQL","3389":"RDP",
+  "5900":"VNC","6379":"Redis","9418":"Git","1433":"MSSQL","161":"SNMP","445":"SMB","8080":"HTTP proxy"};
+const svc = p => SERVICES[p] ? `${SERVICES[p]} (${p})` : (p && p !== "-1" ? `port ${p}` : "—");
+const fmt = n => n.toLocaleString();
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let range = "24h";
+try { range = localStorage.getItem("canary-range") || "24h"; } catch (e) {}
+
+const tip = $("tip");
+function showTip(e, html) {
+  tip.innerHTML = html; tip.style.opacity = 1;
+  const w = tip.offsetWidth, x = Math.min(e.clientX + 12, innerWidth - w - 8);
+  tip.style.left = x + "px"; tip.style.top = (e.clientY - 34) + "px";
+}
+const hideTip = () => tip.style.opacity = 0;
+
+function sev(level) {
+  if (level >= 12) return ["critical", "Critical"];
+  if (level >= 10) return ["serious", "High"];
+  if (level >= 7) return ["warning", "Medium"];
+  return ["low", "Low"];
+}
+
+function timeLabel(t, short) {
+  const d = new Date(t);
+  if (range === "7d") return d.toLocaleDateString([], {weekday: "short", day: "numeric"}) + (short ? "" : " " + d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}));
+  return d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+}
+
+function drawTimeline(points) {
+  const el = $("timeline"), W = el.clientWidth || 800, H = 200, L = 36, B = 22, T = 8;
+  const max = Math.max(1, ...points.map(p => p.n));
+  const nice = Math.pow(10, Math.floor(Math.log10(max)));
+  const top = Math.ceil(max / nice) * nice;
+  const n = points.length, slot = (W - L) / n, bw = Math.max(1, slot - 2);
+  const y = v => T + (H - T - B) * (1 - v / top);
+  let s = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Decoy hits per interval">`;
+  for (const f of [0, 0.5, 1]) {
+    const v = top * f;
+    s += `<line x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>`;
+    s += `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(Math.round(v))}</text>`;
+  }
+  const every = Math.ceil(n / Math.max(2, Math.floor((W - L) / 90)));
+  points.forEach((p, i) => {
+    const x = L + i * slot + 1, h = (H - B) - y(p.n);
+    if (p.n > 0) {
+      const r = Math.min(4, bw / 2, h);
+      s += `<path class="bar" d="M${x},${H - B} v${-(h - r)} q0,${-r} ${r},${-r} h${bw - 2 * r} q${r},0 ${r},${r} v${h - r} z"/>`;
+    }
+    s += `<rect x="${L + i * slot}" y="${T}" width="${slot}" height="${H - T - B}" fill="transparent" data-i="${i}"/>`;
+    if (i % every === 0) s += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${timeLabel(p.t, true)}</text>`;
+  });
+  s += `<line x1="${L}" x2="${W}" y1="${H - B}" y2="${H - B}" stroke="var(--border)"/></svg>`;
+  el.innerHTML = s;
+  el.querySelectorAll("rect[data-i]").forEach(r => {
+    const p = points[+r.dataset.i];
+    r.addEventListener("mousemove", e => showTip(e, `<b>${fmt(p.n)}</b> hits · ${esc(timeLabel(p.t))}`));
+    r.addEventListener("mouseleave", hideTip);
+  });
+}
+
+function drawBars(id, rows, label, unit) {
+  const el = $(id);
+  if (!rows.length) { el.innerHTML = `<div class="empty">Nothing yet</div>`; return; }
+  const max = Math.max(...rows.map(r => r.n));
+  el.innerHTML = rows.map((r, i) => `<div class="hrow" data-i="${i}">
+      <div class="k" title="${esc(label(r.k))}">${esc(label(r.k))}</div>
+      <div class="track"><div style="width:${(r.n / max * 100).toFixed(1)}%"></div></div>
+      <div class="n">${fmt(r.n)}</div></div>`).join("");
+  el.querySelectorAll(".hrow").forEach(row => {
+    const r = rows[+row.dataset.i];
+    row.addEventListener("mousemove", e => showTip(e, `<b>${esc(label(r.k))}</b> · ${fmt(r.n)} ${unit}`));
+    row.addEventListener("mouseleave", hideTip);
+  });
+}
+
+function drawFeed(rows) {
+  if (!rows.length) { $("feed").innerHTML = `<tr><td colspan="7" class="empty">No alerts in this range</td></tr>`; return; }
+  $("feed").innerHTML = rows.map(r => {
+    const [cls, word] = sev(r.level);
+    const creds = r.user || r.pass ? `${esc(r.user)}${r.pass ? " / " + esc(r.pass) : ""}` : "";
+    return `<tr>
+      <td class="mono">${esc(timeLabel(r.ts))}</td>
+      <td><span class="sev ${cls}"><i></i>${word} <span class="mitre">L${r.level}</span></span></td>
+      <td class="mono">${esc(r.src)}</td>
+      <td>${esc(svc(r.port))}</td>
+      <td>${esc(r.desc)}</td>
+      <td class="mono">${creds}</td>
+      <td class="mitre">${esc((r.mitre || []).join(", "))}</td></tr>`;
+  }).join("");
+}
+
+let last = null;
+function render(d) {
+  last = d;
+  $("demo").hidden = !d.demo;
+  $("k-events").textContent = fmt(d.kpis.events);
+  $("k-sources").textContent = fmt(d.kpis.sources);
+  $("k-auth").textContent = fmt(d.kpis.auth);
+  $("k-corr").textContent = fmt(d.kpis.corr);
+  $("tl-title").textContent = `Decoy hits over time (per ${d.interval.replace("m", " min").replace("h", " h")})`;
+  drawTimeline(d.timeline);
+  drawBars("ports", d.ports, svc, "hits");
+  drawBars("sources", d.sources, k => k, "hits");
+  drawBars("users", d.users, k => k, "attempts");
+  drawBars("passwords", d.passwords, k => k, "attempts");
+  drawFeed(d.feed);
+  $("updated").textContent = "updated " + new Date().toLocaleTimeString();
+}
+
+async function load() {
+  try {
+    const r = await fetch(`/api/summary?range=${range}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    $("err").style.display = "none";
+    render(d);
+  } catch (e) {
+    $("err").textContent = "⚠ " + e.message;
+    $("err").style.display = "block";
+  }
+}
+
+document.querySelectorAll(".seg button").forEach(b => {
+  b.setAttribute("aria-pressed", b.dataset.r === range);
+  b.addEventListener("click", () => {
+    range = b.dataset.r;
+    try { localStorage.setItem("canary-range", range); } catch (e) {}
+    document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", x === b));
+    load();
+  });
+});
+addEventListener("resize", () => last && drawTimeline(last.timeline));
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# OpenCanary in Docker, on the host network so each decoy listens on the VM's own IP.
+# The official multi-arch image runs on the Apple Silicon (arm64) VM as well.
+services:
+  opencanary:
+    image: thinkst/opencanary:0.9.10
+    container_name: opencanary
+    restart: unless-stopped
+    network_mode: host
+    tmpfs:
+      - /run
+    volumes:
+      - ./opencanary.conf:/root/.opencanary.conf:ro
+      - /var/log/opencanary:/var/log/opencanary
