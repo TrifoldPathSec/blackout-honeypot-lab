@@ -211,6 +211,10 @@ The report titled the honeypot case *"Scripted multi-protocol credential sprayin
 
 The report also noticed that the case had no source IP: the analyst read `srcip`, while OpenCanary reports `src_host`. The fix is a one-line fallback to `src_host` in the analyst's `correlate.py`, so honeypot cases are grouped per attacker and get IP enrichment.
 
+High and critical cases are posted to Slack. After the fix, the next run arrived as a case attributed to 192.168.64.1, with the full triage summary:
+
+![AI SOC Analyst Slack alert: HIGH true_positive credential spray and service sweep against canary-01](images/slack-alert.webp)
+
 ## Lessons learned
 
 - **Check what already owns the ports.** The Wazuh manager would not start: `wazuh-authd` failed with `Unable to Bind port '1515'`. A Docker Wazuh stack from an earlier lab (`ai-soc-lab`) was starting at boot and holding 1514, 1515, 443 and 9200. `ss -ltnp` showed `docker-proxy` as the owner. The first fix stopped those containers, which also silently took down the AI SOC analyst and Sharrowkyn that depend on them. The final fix went the other way: keep the shared Docker Wazuh, disable the native install, and load the honeypot rules into the container (`install-docker.sh`). **Before switching anything off, find out what depends on it.**
