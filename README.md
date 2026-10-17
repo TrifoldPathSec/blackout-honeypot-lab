@@ -52,7 +52,7 @@ scp -r canary-vm <user>@<canary-ip>:~
 ```
 
 ```bash
-ssh <user>@<canary-ip> 'cd canary-vm && sudo ./setup.sh <wazuh-ip> <mac-ip>'
+ssh -t <user>@<canary-ip> 'cd canary-vm && sudo bash setup.sh <wazuh-ip> <mac-ip>'
 ```
 
 The script:
