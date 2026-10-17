@@ -1,0 +1,9 @@
+# Compose override for a Dockerized Wazuh manager (wazuh-docker single-node).
+# install-docker.sh copies this to /opt/opencanary-wazuh/ and adds it to the
+# Wazuh project's COMPOSE_FILE, so the manager container loads the OpenCanary
+# rules. The canary ships its log through its own Wazuh agent, so no log mount
+# is needed here.
+services:
+  wazuh.manager:
+    volumes:
+      - /opt/opencanary-wazuh/opencanary_rules.xml:/var/ossec/etc/rules/opencanary_rules.xml:ro

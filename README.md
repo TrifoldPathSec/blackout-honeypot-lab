@@ -14,7 +14,7 @@ flowchart LR
         A["Wazuh agent<br/>(existing)"]
         X["simulate_attacks.py<br/>(attacker)"]
         subgraph UTM["UTM hypervisor · shared network"]
-            S["VM 1: Ubuntu<br/>Wazuh server + dashboard<br/>+ canary_dashboard.py"]
+            S["VM 1: Ubuntu · Docker<br/>Wazuh 4.14.9 (wazuh-docker)<br/>+ AI SOC analyst + canary_dashboard.py"]
             C["VM 2: Ubuntu<br/>OpenCanary (Docker)<br/>+ Wazuh agent"]
         end
     end
@@ -22,6 +22,7 @@ flowchart LR
     C -- "opencanary.log (JSON)<br/>agent → 1514/tcp" --> S
     A --> S
     S -- "rules 100500–100549<br/>→ wazuh-alerts-*" --> D["Attack dashboard<br/>(SSH tunnel :8088)"]
+    S -- "level ≥ 7" --> AI["AI SOC analyst<br/>Claude triage → report + Slack"]
 ```
 
 ### Why a separate VM for the honeypot
@@ -66,17 +67,25 @@ From now on, manage the VM with `ssh -p 2222 <user>@<canary-ip>`.
 
 ### 3. Load the detection rules on the Wazuh server
 
-```bash
-scp wazuh-manager/opencanary_rules.xml <user>@<wazuh-ip>:/tmp/
-```
-
-On the Wazuh VM:
+The lab SIEM is the Dockerized Wazuh from the [AI SOC analyst lab](https://github.com/TrifoldPathSec/kshrike-ai-soc-analyst) (official `wazuh-docker` single-node), shared with [Sharrowkyn](https://github.com/TrifoldPathSec/sharrowkyn-phishing-analyzer). `install-docker.sh` mounts the rules into the manager container with a compose override, the same pattern Sharrowkyn uses:
 
 ```bash
-sudo install -o wazuh -g wazuh -m 0660 /tmp/opencanary_rules.xml /var/ossec/etc/rules/ && sudo systemctl restart wazuh-manager
+scp -r wazuh-manager <user>@<wazuh-ip>:~
 ```
 
-Test the rules before generating traffic: run `sudo /var/ossec/bin/wazuh-logtest` and paste a line from `wazuh-manager/sample-events.jsonl`. The SSH sample should match rule **100512**, level 10, MITRE T1110.
+```bash
+ssh -t <user>@<wazuh-ip> 'cd ~/wazuh-manager && sudo bash install-docker.sh'
+```
+
+The script adds `compose.opencanary.yml` to the project's `COMPOSE_FILE`, brings the stack up, runs `wazuh-analysisd -t` inside the manager and rolls `.env` back if validation fails. It also stops and disables any native (systemd) Wazuh on the VM so the two never compete for ports 1514, 1515, 443 and 9200. It takes the compose project folder as an argument (default `~/ai-soc-lab`).
+
+On a native Wazuh install instead, copy the file to `/var/ossec/etc/rules/` (owner `wazuh:wazuh`, mode 0660) and restart `wazuh-manager`.
+
+Test the rules before generating traffic. Open `wazuh-logtest` in the manager container and paste a line from `wazuh-manager/sample-events.jsonl`; the SSH sample should match rule **100512**, level 10, MITRE T1110:
+
+```bash
+ssh -t <user>@<wazuh-ip> 'cd ~/ai-soc-lab && sudo docker compose exec wazuh.manager /var/ossec/bin/wazuh-logtest'
+```
 
 ### 4. Attack it
 
@@ -92,10 +101,10 @@ Then in the Wazuh dashboard: **Threat Hunting** → filter `rule.groups: opencan
 
 On the Wazuh VM (copy `dashboard/` over first; it needs only Python 3, no packages, no internet):
 
-The indexer's CA certificate lives in a root-only folder, so copy it next to the dashboard once:
+Copy the indexer's CA certificate next to the dashboard once. For wazuh-docker it is under the compose project; on a native install it is `/etc/wazuh-indexer/certs/root-ca.pem` (root-only):
 
 ```bash
-sudo install -m 0644 /etc/wazuh-indexer/certs/root-ca.pem ~/dashboard/root-ca.pem
+sudo install -m 0644 ~/ai-soc-lab/wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem ~/dashboard/root-ca.pem
 ```
 
 ```bash
@@ -110,7 +119,7 @@ ssh -L 8088:127.0.0.1:8088 <user>@<wazuh-ip>
 
 Preview it anywhere with generated data: `python3 dashboard/canary_dashboard.py --demo`.
 
-The indexer admin password is in `wazuh-install-files.tar` (`wazuh-passwords.txt`) from the all-in-one install. A read-only indexer user is better than `admin`. Set it with `INDEXER_USER`.
+Use the indexer admin password of your Wazuh deployment. A read-only indexer user is better than `admin`; set it with `INDEXER_USER`.
 
 ## Detection rules
 
@@ -186,13 +195,30 @@ First live run, 16 October 2026: `simulate_attacks.py` from the Mac (192.168.64.
 
 ![Latest alerts table with severity, credentials and MITRE technique](images/dashboard-alerts.webp)
 
+### Triaged by the AI SOC analyst
+
+On the shared Docker Wazuh, the [AI SOC analyst](https://github.com/TrifoldPathSec/kshrike-ai-soc-analyst) polls for alerts at level 7 or higher. After one `simulate_attacks.py` run it grouped 39 new alerts into two cases and had Claude triage them:
+
+```
+39 new alert(s) -> 2 case(s)
+triaging case canary-01-opencanary-n_a (19 alerts, level 12)
+  -> high / true_positive   report: 20261017T073945Z_high_canary-01-opencanary-n_a.md
+triaging case canary-01-ossec-n_a (20 alerts, level 7)
+  -> low / false_positive   report: 20261017T074003Z_low_canary-01-ossec-n_a.md
+```
+
+The report titled the honeypot case *"Scripted multi-protocol credential spraying and service sweep against OpenCanary decoy canary-01"* (confidence 0.88). It mapped it to T1046, T1110.001, T1078.001, T1021.004, T1190 and T1213.003 and read the evidence closely: FTP attempts 14 ms apart as proof of scripting, `CONFIG GET dir` as Redis recon that usually comes before a webshell or `authorized_keys` write, and 192.168.64.1 as the likely hypervisor host, so probably a simulated attack. The second case, the canary's own agent re-enrollment noise, was correctly dismissed as a false positive.
+
+The report also noticed that the case had no source IP: the analyst read `srcip`, while OpenCanary reports `src_host`. The fix is a one-line fallback to `src_host` in the analyst's `correlate.py`, so honeypot cases are grouped per attacker and get IP enrichment.
+
 ## Lessons learned
 
-- **Check what already owns the ports.** The Wazuh manager would not start: `wazuh-authd` failed with `Unable to Bind port '1515'`. A Docker Wazuh stack from an earlier lab (`ai-soc-lab`) was starting at boot and holding 1514, 1515, 443 and 9200. `ss -ltnp` showed `docker-proxy` as the owner. The fix was to stop those containers and set `--restart=no`, so only one SIEM owns the ports.
+- **Check what already owns the ports.** The Wazuh manager would not start: `wazuh-authd` failed with `Unable to Bind port '1515'`. A Docker Wazuh stack from an earlier lab (`ai-soc-lab`) was starting at boot and holding 1514, 1515, 443 and 9200. `ss -ltnp` showed `docker-proxy` as the owner. The first fix stopped those containers, which also silently took down the AI SOC analyst and Sharrowkyn that depend on them. The final fix went the other way: keep the shared Docker Wazuh, disable the native install, and load the honeypot rules into the container (`install-docker.sh`). **Before switching anything off, find out what depends on it.**
 - **Two SIEMs means two sets of credentials.** The dashboard rejected the saved admin password because it belonged to the Docker stack. Testing it against the indexer directly (`curl -u admin:… https://127.0.0.1:9200` → `401`) separated "wrong password" from "service down".
 - **Changing the admin password has a second step.** Filebeat ships alerts to the indexer with the admin password. After `wazuh-passwords-tool.sh`, the Filebeat keystore must be updated too, or alerts stop reaching the dashboard without any visible error.
 - **Newer Python is stricter about certificates.** Python 3.13+ rejects Wazuh's self-generated root CA ("CA cert does not include key usage extension"). The dashboard clears only that strict flag and still verifies the chain against the Wazuh CA, rather than turning verification off.
 - **Validate rules before restarting.** `wazuh-analysisd -t` returned 0, which ruled out the new rules file as the cause of the outage.
+- **An agent can only belong to one manager.** Moving canary-01 to the Docker manager failed with `Duplicate agent name: canary-01`: it had first enrolled there, and the old entry still held the name. `manage_agents -r <id>` in the manager container cleared it, and the agent re-enrolled on its next retry.
 - **Decoys move the real services.** After setup, port 22 on the canary is the honeypot, and administration happens on 2222, restricted to the Mac.
 
 ## Repository layout
@@ -205,6 +231,8 @@ canary-vm/
 wazuh-manager/
   opencanary_rules.xml     rules 100500-100549
   sample-events.jsonl      real-format events for wazuh-logtest
+  install-docker.sh        loads the rules into a wazuh-docker manager
+  compose.opencanary.yml   compose override that mounts the rules
 dashboard/
   canary_dashboard.py      indexer query + web server (stdlib only)
   index.html               the dashboard page
